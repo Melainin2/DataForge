@@ -86,9 +86,17 @@ The product behaves like a real assistant: you *speak*, it *understands*,
 *thinks*, answers, and can be **interrupted mid-sentence** — exactly like a
 natural human conversation.
 
-**Current status:** repository scaffolded (✅ docs, ✅ git). All application
-features are 🔮 **PLANNED** and scheduled on the
-[roadmap](#25-development-roadmap-sept-130-2026).
+**Current status:** **Part 1 — System Foundation is implemented and verified.**
+The voice pipeline works end-to-end in mock mode (no API key required) and is
+wired for the real AssemblyAI Universal-Streaming API (`STT_MODE=real`). The
+agentic layer (LLM, tools, RAG, memory, TTS) is 🔮 **PLANNED** for Parts 2–4.
+
+| Part | Scope | Status |
+| :--- | :--- | :--- |
+| **Part 1** | System foundation: UI, mic, WebSocket relay, AssemblyAI streaming, transcript | ✅ IMPLEMENTED |
+| Part 2 | Agent orchestration, memory, tools | 🔮 PLANNED |
+| Part 3 | Voice experience: barge-in, streaming TTS, latency | 🔮 PLANNED |
+| Part 4 | Polish, deployment, demo & submission | 🔮 PLANNED |
 
 ---
 
@@ -154,18 +162,20 @@ DataForge is a **single, coherent voice product**:
 
 | # | Feature | Status |
 | :-: | :--- | :-: |
-| 1 | Real-time streaming speech recognition (AssemblyAI universal-streaming API) | 🔮 PLANNED |
-| 2 | Low-latency agentic loop (LLM + tool calling) | 🔮 PLANNED |
-| 3 | Conversational memory (short-term per session + long-term optional) | 🔮 PLANNED |
-| 4 | RAG knowledge base (ChromaDB + local embeddings) | 🔮 PLANNED |
-| 5 | Turn detection & **barge-in / interruption handling** | 🔮 PLANNED |
-| 6 | Streaming TTS back to the browser | 🔮 PLANNED |
-| 7 | Live audio waveform (Web Audio `AnalyserNode`, Canvas — no heavy lib) | 🔮 PLANNED |
-| 8 | Animated voice states & glassmorphism dark UI | 🔮 PLANNED |
-| 9 | Responsive design (desktop → mobile) with accessible voice controls | 🔮 PLANNED |
-| 10 | Latency observability per pipeline stage | 🔮 PLANNED |
-| 11 | `.env`-based secrets, never in frontend | ✅ IMPLEMENTED (policy documented) |
-| 12 | Professional documentation & roadmap | ✅ IMPLEMENTED |
+| 1 | Real-time streaming speech recognition — AssemblyAI v3 Universal-Streaming client (real + mock) | ✅ IMPLEMENTED |
+| 2 | Voice WebSocket relay (browser ↔ FastAPI ↔ AssemblyAI) with validation & error codes | ✅ IMPLEMENTED |
+| 3 | Browser microphone capture → 16 kHz PCM16 resampler → base64 streaming | ✅ IMPLEMENTED |
+| 4 | Live partial/final transcript rendered in the conversation panel | ✅ IMPLEMENTED |
+| 5 | Centralized voice state machine (`IDLE/LISTENING/PROCESSING/THINKING/SPEAKING/ERROR`) | ✅ IMPLEMENTED |
+| 6 | WebSocket connection management (connect / reconnect / backoff / error) | ✅ IMPLEMENTED |
+| 7 | Dark glassmorphism UI, live canvas waveform (reactive to mic), responsive layout | ✅ IMPLEMENTED |
+| 8 | `.env`-based secrets, never in frontend; `.env.example` + `.gitignore` | ✅ IMPLEMENTED |
+| 9 | Low-latency agentic loop (LLM + tool calling) | 🔮 PLANNED |
+| 10 | Conversational memory (short-term per session + long-term optional) | 🔮 PLANNED |
+| 11 | RAG knowledge base (ChromaDB + local embeddings) | 🔮 PLANNED |
+| 12 | Turn detection & **barge-in / interruption handling** | 🔮 PLANNED |
+| 13 | Streaming TTS back to the browser | 🔮 PLANNED |
+| 14 | Latency observability per pipeline stage | 🔮 PLANNED |
 
 ---
 
@@ -447,37 +457,52 @@ DataForge/
 ├── README.md                 # this document
 ├── .env.example              # secrets template (no real values)
 ├── .gitignore
-├── frontend/                 # Next.js app
-│   ├── app/
-│   │   ├── page.tsx          # home / voice UI
-│   │   └── layout.tsx
-│   ├── components/
-│   │   ├── VoiceVisualizer.tsx    # canvas waveform
-│   │   ├── MicrophoneButton.tsx   # stateful mic
-│   │   └── TranscriptPanel.tsx
-│   ├── lib/
-│   │   ├── ws.ts                  # websocket client
-│   │   └── states.ts              # agent state machine
-│   └── package.json
 ├── backend/                  # FastAPI app
-│   ├── main.py               # websocket gateway
-│   ├── agent/
-│   │   ├── graph.py          # LangGraph loop
-│   │   ├── tools.py          # tool registry
-│   │   └── memory.py         # checkpointer wiring
-│   ├── services/
-│   │   ├── assemblyai.py     # streaming STT client
-│   │   └── tts.py            # TTS client
-│   ├── rag/
-│   │   ├── ingest.py         # parse → chunk → embed
-│   │   └── store.py          # ChromaDB wrapper
-│   ├── tests/
-│   └── requirements.txt
+│   ├── requirements.txt
+│   ├── .env.example
+│   ├── app/
+│   │   ├── main.py           # app factory, CORS, router wiring
+│   │   ├── config.py         # pydantic-settings (env-based config)
+│   │   ├── api/
+│   │   │   └── health.py     # GET /api/health
+│   │   ├── ws/
+│   │   │   └── router.py     # /ws/voice relay (validated WS messages)
+│   │   ├── services/
+│   │   │   └── assemblyai.py # v3 streaming client (real + mock)
+│   │   ├── models/
+│   │   │   └── ws.py         # client message + outbound payload builders
+│   │   └── utils/
+│   │       └── logging.py
+│   └── tests/                # pytest (health + WebSocket relay)
+├── frontend/                 # Next.js app
+│   ├── package.json
+│   ├── next.config.mjs
+│   ├── tsconfig.json
+│   ├── postcss.config.mjs
+│   ├── .env.example          # NEXT_PUBLIC_WS_URL only
+│   ├── app/
+│   │   ├── layout.tsx
+│   │   ├── globals.css       # Tailwind v4 + dark theme tokens
+│   │   └── page.tsx          # voice agent page (client component)
+│   ├── components/
+│   │   ├── connection-badge.tsx
+│   │   ├── mic-button.tsx     # stateful glowing mic
+│   │   ├── waveform.tsx       # canvas analyser/level visualization
+│   │   └── transcript-panel.tsx
+│   ├── hooks/
+│   │   ├── use-voice-session.ts  # WS lifecycle + reconnect + transcript merge
+│   │   └── use-microphone.ts     # capture → 16 kHz PCM16 resampler
+│   └── lib/
+│       ├── types.ts          # shared WS/types + transcript model
+│       ├── states.ts         # centralized voice state machine
+│       ├── transcript.ts     # partial/final merge logic
+│       └── audio.ts          # PCM16 → base64 encode
 └── docs/
-    └── architecture-diagram.md   # deeper dive (optional)
+    └── architecture-diagram.md   # deeper dive (optional, not yet created)
 ```
 
-> 🔮 Structure target. Current repository contains only `README.md`.
+> ✅ The structure above matches the current repository (agent/RAG/TTS folders
+> will be added in Parts 2–4).
 
 ---
 
@@ -485,10 +510,10 @@ DataForge/
 
 ### Prerequisites
 
-- Python **3.11+**
-- Node.js **20+** (LTS) and npm
+- Python **3.11+** (tested with 3.12)
+- Node.js **20+** (LTS) and npm (tested with Node 26 / npm 11)
 - A microphone (desktop or mobile browser)
-- Free API keys: **AssemblyAI**, your chosen **LLM provider**, optional TTS
+- An AssemblyAI API key for real streaming — **not needed** for mock mode
 
 ### Steps
 
@@ -501,15 +526,12 @@ cd DataForge
 cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp ../.env.example .env      # fill with your keys
+cp .env.example .env         # add your ASSEMBLYAI_API_KEY
 
 # 3. Frontend
 cd ../frontend
 npm install
-cp ../.env.example .env.local
-
-# 4. Ingest knowledge base (optional, if RAG content is used)
-python -m rag.ingest --docs ./knowledge
+cp .env.example .env.local   # keep NEXT_PUBLIC_WS_URL default for local dev
 ```
 
 ---
@@ -520,25 +542,20 @@ python -m rag.ingest --docs ./knowledge
 > frontend code; the browser only talks to our backend.
 
 ```env
-# --- AssemblyAI ---
+# --- AssemblyAI (real streaming) ---
 ASSEMBLYAI_API_KEY=
+ASSEMBLYAI_SPEECH_MODEL=universal-3-5-pro
 
-# --- LLM (OpenAI-compatible endpoint, e.g. Groq free tier) ---
-LLM_API_KEY=
-LLM_BASE_URL=
-LLM_MODEL=
-LLM_TEMPERATURE=0.3
-
-# --- TTS ---
-TTS_ENGINE=piper          # or edge-tts / elevenlabs-free
-TTS_VOICE=
-
-# --- RAG (local, no secret required) ---
-CHROMA_PERSIST_DIR=./data/chroma
+# real -> stream to AssemblyAI (needs a key)
+# mock -> deterministic fake transcripts, perfect for local dev/tests
+STT_MODE=real
 
 # --- Server ---
-PORT=8000
 FRONTEND_ORIGIN=http://localhost:3000
+LOG_LEVEL=INFO
+
+# --- Frontend (frontend/.env.local) ---
+# NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws/voice
 ```
 
 ---
@@ -546,40 +563,56 @@ FRONTEND_ORIGIN=http://localhost:3000
 ## 19. Local Development
 
 ```bash
-# Backend (reload on save)
-uvicorn backend.main:app --reload --port 8000
+# Backend (mock STT — no API key needed; great for offline demos)
+cd backend
+source .venv/bin/activate
+STT_MODE=mock uvicorn app.main:app --reload --port 8000
+
+# Backend (real AssemblyAI streaming)
+cd backend
+source .venv/bin/activate
+uvicorn app.main:app --reload --port 8000   # reads backend/.env
 
 # Frontend
+cd frontend
 npm run dev
 # open http://localhost:3000
 ```
 
 Opening the page triggers the mic-consent flow, opens the WebSocket, and the
-agent begins `LISTENING`.
-
----
+agent enters `LISTENING` on tap. Say something — partials stream in live,
+finals resolve, and the conversation renders below the mic.
 
 ## 20. API & WebSocket
 
-**WebSocket endpoint:** `ws://localhost:8000/ws/voice`
+**WebSocket endpoint:** `ws://localhost:8000/ws/voice` (backend-local;
+configured in the frontend via `NEXT_PUBLIC_WS_URL`)
 
 | Direction | Message (JSON) | Purpose |
 | :--- | :--- | :--- |
-| Browser → Backend | `{"type":"audio","data":"<base64 pcm>"}` | Stream mic audio |
-| Browser → Backend | `{"type":"interrupt"}` | Barge-in request |
-| Backend → Browser | `{"type":"state","state":"LISTENING"}` | Agent state change |
-| Backend → Browser | `{"type":"partial","text":"..."}` | Live transcript |
+| Browser → Backend | `{"type":"start_session"}` | Open an AssemblyAI session, → `LISTENING` |
+| Browser → Backend | `{"type":"audio","data":"<base64 pcm16>"}` | Stream mic audio (16 kHz mono) |
+| Browser → Backend | `{"type":"stop_session"}` | Send `Terminate`, flush the final transcript |
+| Browser → Backend | `{"type":"ping"}` | Keepalive → `pong` |
+| Backend → Browser | `{"type":"connected","session_id":"..."}` | Relay established |
+| Backend → Browser | `{"type":"state","state":"LISTENING"}` | Server-side voice state change |
+| Backend → Browser | `{"type":"partial","text":"..."}` | Live (non-final) transcript |
 | Backend → Browser | `{"type":"final","text":"..."}` | Final transcript |
-| Backend → Browser | `{"type":"audio","data":"<base64 mp3>"}` | Streamed TTS audio |
-| Backend → Browser | `{"type":"latency","stt":..,"agent":..,"tts":..}` | Observability |
-| Backend → Browser | `{"type":"error","message":"..."}` | Recoverable errors |
+| Backend → Browser | `{"type":"session_closed"}` | STT session ended |
+| Backend → Browser | `{"type":"error","code":"...","message":"..."}` | Recoverable errors |
 
-**Lifecycle:**
-1. Client authenticates + requests `audio` channel.
-2. Backend opens an AssemblyAI universal-streaming socket.
-3. Mic PCM flows browser → backend → AssemblyAI; transcripts + states flow back.
-4. On final transcript, the agent runs; TTS audio streams back; barge-in
-   restarts this loop.
+**Lifecycle (Part 1):**
+1. Browser opens the WebSocket; backend acks with `connected`.
+2. Browser sends `start_session` → backend connects to the AssemblyAI
+   Universal-Streaming socket (v3) → `state: LISTENING`.
+3. Mic PCM (16 kHz PCM16, base64 frames) flows browser → backend → AssemblyAI.
+4. AssemblyAI `Turn` messages are relayed as `partial` (end_of_turn=false) or
+   `final` (end_of_turn=true).
+5. `stop_session` → backend sends `{"type":"Terminate"}` (flushes the final
+   transcript), closes the session, returns to `state: IDLE`.
+
+> Interrupt message (`interrupt`) and TTS/agent messages are reserved for
+> Parts 2–3 and intentionally not implemented yet.
 
 ---
 
@@ -645,18 +678,21 @@ Lightweight, self-hosted, zero-cost:
 
 ## 25. Development Roadmap (Sept 1–30, 2026)
 
-> 🔮 All items are planned. Statuses will be flipped to ✅/In progress as work lands.
+> 🔮 Items are planned unless marked ✅. Statuses flip as work lands.
 
 ### WEEK 1 — MVP · *Goal: Working Voice Agent*
 
+> ✅ **Part 1 delivered** — the foundation below is implemented and tested.
+
 - [x] Clean repository, init git, professional README
-- [ ] Verify architecture & document stack
-- [ ] AssemblyAI universal-streaming integration
-- [ ] Microphone capture (Web Audio API)
-- [ ] Real-time transcription streaming
-- [ ] Basic LLM turn
-- [ ] Basic TTS response
-- [ ] Basic frontend (mic button + transcript)
+- [x] Verify architecture & document stack
+- [x] AssemblyAI universal-streaming integration (v3 client, real + mock)
+- [x] Microphone capture (Web Audio API → 16 kHz PCM16 resampler)
+- [x] Real-time transcription streaming (partial + final relay)
+- [x] Voice WebSocket relay with validation, states & error codes
+- [x] Basic frontend (mic button, live waveform, transcript panel, connection badge)
+- [ ] Basic LLM turn (Part 2)
+- [ ] Basic TTS response (Part 2/3)
 
 ### WEEK 2 — AGENT · *Goal: chatbot → agent*
 
