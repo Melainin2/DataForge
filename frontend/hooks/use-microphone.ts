@@ -12,7 +12,7 @@ type OnAudioData = (pcm16: Int16Array) => void;
 interface Microphone {
   status: MicrophoneStatus;
   error: string | null;
-  start: (onData: OnAudioData) => Promise<void>;
+  start: (onData: OnAudioData) => Promise<boolean>;
   stop: () => void;
   getLevel: () => number;
   getAnalyser: () => AnalyserNode | null;
@@ -31,11 +31,13 @@ export function useMicrophone(): Microphone {
   const streamRef = useRef<MediaStream | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const zeroGainRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const activeRef = useRef(false);
   const levelRef = useRef(0);
   const onDataRef = useRef<OnAudioData | null>(null);
   const resamplerRef = useRef({ ratio: 0, position: 0 });
+  const prevTailRef = useRef(0);
   const chunkRef = useRef(new Int16Array(CHUNK_SAMPLES));
   const chunkLenRef = useRef(0);
 
@@ -49,6 +51,10 @@ export function useMicrophone(): Microphone {
       sourceRef.current.disconnect();
       sourceRef.current = null;
     }
+    if (zeroGainRef.current) {
+      zeroGainRef.current.disconnect();
+      zeroGainRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -60,21 +66,22 @@ export function useMicrophone(): Microphone {
     analyserRef.current = null;
     levelRef.current = 0;
     chunkLenRef.current = 0;
+    prevTailRef.current = 0;
     onDataRef.current = null;
   }, []);
 
   const start = useCallback(
-    async (onData: OnAudioData) => {
-      if (activeRef.current || status === "starting") {
-        console.warn("microphone already starting/active");
-        return;
+    async (onData: OnAudioData): Promise<boolean> => {
+      if (activeRef.current) {
+        return false;
       }
       if (!navigator.mediaDevices?.getUserMedia || !("AudioContext" in window)) {
         setStatus("unsupported");
         setError("Microphone capture is not supported by this browser.");
-        return;
+        return false;
       }
 
+      activeRef.current = true;
       setStatus("starting");
       setError(null);
       onDataRef.current = onData;
@@ -107,21 +114,32 @@ export function useMicrophone(): Microphone {
         analyser.smoothingTimeConstant = 0.7;
         analyserRef.current = analyser;
 
+        // Keep the audio graph alive without routing mic audio to the speakers.
+        const zeroGain = ctx.createGain();
+        zeroGain.gain.value = 0;
+        zeroGainRef.current = zeroGain;
+
         resamplerRef.current = { ratio: ctx.sampleRate / TARGET_RATE, position: 0 };
+        prevTailRef.current = 0;
         chunkLenRef.current = 0;
 
         processor.onaudioprocess = (event) => {
           const input = event.inputBuffer.getChannelData(0);
+          const length = input.length;
 
           // Energy measurement for voice activity / waveform fallback.
           let sum = 0;
-          for (let i = 0; i < input.length; i += 4) sum += input[i] * input[i];
-          const rms = Math.sqrt(sum / (input.length / 4));
+          for (let i = 0; i < length; i += 4) sum += input[i] * input[i];
+          const rms = Math.sqrt(sum / Math.max(length / 4, 1));
           levelRef.current = Math.min(1, rms * 6);
 
           const { ratio, position } = resamplerRef.current;
-          const outCount = Math.floor((input.length - position) / ratio);
-          if (outCount <= 0) return;
+          // Keep the output aligned so the carry position stays within (-1, ratio - 1].
+          const outCount = length > 0 ? Math.floor((length - 1 - position) / ratio) + 1 : 0;
+          if (outCount <= 0) {
+            if (length > 0) prevTailRef.current = input[length - 1];
+            return;
+          }
 
           const chunk = chunkRef.current;
           let chunkLen = chunkLenRef.current;
@@ -130,10 +148,13 @@ export function useMicrophone(): Microphone {
           for (let i = 0; i < outCount; i++) {
             const pos = position + i * ratio;
             const i0 = Math.floor(pos);
-            const i1 = Math.min(i0 + 1, input.length - 1);
             const frac = pos - i0;
-            const sample = input[i0] * (1 - frac) + input[i1] * frac;
-            const clamped = Math.max(-1, Math.min(1, sample));
+            // When the carry position is negative the interpolated sample sits
+            // between the previous buffer's tail and this buffer's head.
+            const s0 = i0 >= 0 ? input[i0] : prevTailRef.current;
+            const s1 = i0 >= 0 ? input[Math.min(i0 + 1, length - 1)] : input[0];
+            const interpolated = s0 * (1 - frac) + s1 * frac;
+            const clamped = Math.max(-1, Math.min(1, interpolated));
             chunk[chunkLen] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
             chunkLen += 1;
             if (chunkLen === chunkCap) {
@@ -142,17 +163,20 @@ export function useMicrophone(): Microphone {
             }
           }
 
-          resamplerRef.current.position = position + outCount * ratio - input.length;
+          if (length > 0) prevTailRef.current = input[length - 1];
+          resamplerRef.current.position = position + outCount * ratio - length;
           chunkLenRef.current = chunkLen;
         };
 
-        // Wire source -> analyser + processor; keep the graph alive via destination.
+        // Wire source -> analyser + processor; route output through a silent gain
+        // so onaudioprocess keeps firing without audible feedback.
         source.connect(analyser);
         source.connect(processor);
-        processor.connect(ctx.destination);
+        processor.connect(zeroGain);
+        zeroGain.connect(ctx.destination);
 
-        activeRef.current = true;
         setStatus("active");
+        return true;
       } catch (err) {
         activeRef.current = false;
         const name = (err as { name?: string }).name;
@@ -167,9 +191,10 @@ export function useMicrophone(): Microphone {
         setError(message);
         setStatus("error");
         cleanup();
+        return false;
       }
     },
-    [cleanup, status],
+    [cleanup],
   );
 
   const stop = useCallback(() => {

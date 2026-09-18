@@ -9,6 +9,7 @@ from app.main import create_app
 @pytest.fixture()
 def client():
     os.environ["STT_MODE"] = "mock"
+    os.environ["LLM_MODE"] = "mock"
     with TestClient(create_app()) as test_client:
         yield test_client
 
@@ -20,6 +21,8 @@ def test_health_ok(client: TestClient):
     assert body["status"] == "ok"
     assert body["service"] == "dataforge-voice-backend"
     assert body["stt_mode"] == "mock"
+    assert body["llm_mode"] == "mock"
+    assert body["agent_enabled"] is True
 
 
 def test_root_info(client: TestClient):

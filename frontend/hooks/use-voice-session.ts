@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { upsertUserTranscript } from "@/lib/transcript";
+import { appendAgentMessage, upsertUserTranscript } from "@/lib/transcript";
 import { canTransition } from "@/lib/states";
 import type {
+  ActionItem,
   ClientMessage,
   ConnectionState,
   ServerMessage,
@@ -24,6 +25,7 @@ export function useVoiceSession() {
   const [connection, setConnection] = useState<ConnectionState>("CONNECTING");
   const [voiceState, setVoiceState] = useState<VoiceState>("IDLE");
   const [transcripts, setTranscripts] = useState<TranscriptMessage[]>([]);
+  const [actionItems, setActionItems] = useState<ActionItem[]>([]);
   const [lastError, setLastError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -54,6 +56,8 @@ export function useVoiceSession() {
     (msg: ServerMessage) => {
       switch (msg.type) {
         case "connected":
+          // Fresh server session: reset to IDLE (a start_session follows if needed).
+          applyServerState("IDLE");
           break;
         case "state":
           applyServerState(msg.state);
@@ -62,7 +66,14 @@ export function useVoiceSession() {
           setTranscripts((prev) => upsertUserTranscript(prev, msg.text, false));
           break;
         case "final":
-          setTranscripts((prev) => upsertUserTranscript(prev, msg.text, true));
+          setTranscripts((prev) => upsertUserTranscript(prev, msg.text, true, msg.confidence));
+          break;
+        case "agent_message":
+          setTranscripts((prev) => appendAgentMessage(prev, msg.text, msg.needs_confirmation));
+          if (msg.action_item) {
+            const item = msg.action_item;
+            setActionItems((prev) => [...prev, item]);
+          }
           break;
         case "session_closed":
           applyServerState("IDLE");
@@ -161,6 +172,7 @@ export function useVoiceSession() {
   const disconnect = useCallback(() => {
     reconnectEnabledRef.current = false;
     closedByUsRef.current = true;
+    queueRef.current = [];
     clearSocket();
     setConnection("DISCONNECTED");
   }, [clearSocket]);
@@ -169,6 +181,7 @@ export function useVoiceSession() {
     return () => {
       reconnectEnabledRef.current = false;
       closedByUsRef.current = true;
+      queueRef.current = [];
       clearSocket();
     };
   }, [clearSocket]);
@@ -187,6 +200,7 @@ export function useVoiceSession() {
     connection,
     voiceState,
     transcripts,
+    actionItems,
     lastError,
     connect,
     disconnect,

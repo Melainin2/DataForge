@@ -15,13 +15,33 @@ export function upsertUserTranscript(
   messages: TranscriptMessage[],
   text: string,
   final: boolean,
+  confidence?: number,
 ): TranscriptMessage[] {
   const last = messages[messages.length - 1];
   if (last && last.speaker === "user" && !last.final) {
-    return [...messages.slice(0, -1), { ...last, text, final }];
+    return [...messages.slice(0, -1), { ...last, text, final, confidence }];
   }
   return [
     ...messages,
-    { id: nextId(), speaker: "user" as Speaker, text, timestamp: Date.now(), final },
+    { id: nextId(), speaker: "user" as Speaker, text, timestamp: Date.now(), final, confidence },
+  ];
+}
+
+/** Append a completed agent reply as a distinct conversation message. */
+export function appendAgentMessage(
+  messages: TranscriptMessage[],
+  text: string,
+  needsConfirmation?: boolean,
+): TranscriptMessage[] {
+  return [
+    ...messages,
+    {
+      id: nextId(),
+      speaker: "agent" as Speaker,
+      text,
+      timestamp: Date.now(),
+      final: true,
+      needsConfirmation,
+    },
   ];
 }

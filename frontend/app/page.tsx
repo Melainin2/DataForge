@@ -3,6 +3,7 @@
 import { useCallback, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Sparkles } from "lucide-react";
+import { ActionItemsPanel } from "@/components/action-items-panel";
 import { ConnectionBadge } from "@/components/connection-badge";
 import { MicButton } from "@/components/mic-button";
 import { TranscriptPanel } from "@/components/transcript-panel";
@@ -13,7 +14,7 @@ import { useMicrophone } from "@/hooks/use-microphone";
 import { useVoiceSession } from "@/hooks/use-voice-session";
 
 export default function Home() {
-  const { connection, voiceState, transcripts, lastError, connect, disconnect, send } =
+  const { connection, voiceState, transcripts, actionItems, lastError, connect, disconnect, send } =
     useVoiceSession();
   const microphone = useMicrophone();
 
@@ -32,8 +33,12 @@ export default function Home() {
       connect(true);
       return;
     }
-    await microphone.start((pcm16) => send({ type: "audio", data: int16ToBase64(pcm16) }));
-    send({ type: "start_session" });
+    const started = await microphone.start((pcm16) =>
+      send({ type: "audio", data: int16ToBase64(pcm16) }),
+    );
+    if (started) {
+      send({ type: "start_session" });
+    }
   }, [connection, connect, microphone, send, voiceState]);
 
   const micDisabled =
@@ -100,9 +105,10 @@ export default function Home() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.1, ease: "easeOut" }}
-        className="w-full max-w-2xl pb-12"
+        className="flex w-full max-w-2xl flex-col gap-4 pb-12"
       >
         <TranscriptPanel messages={transcripts} />
+        <ActionItemsPanel items={actionItems} />
       </motion.div>
     </main>
   );

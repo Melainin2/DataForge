@@ -12,6 +12,7 @@ PCM16_1S = base64.b64encode(b"\x00\x00" * 16000).decode()
 @pytest.fixture()
 def client():
     os.environ["STT_MODE"] = "mock"
+    os.environ["LLM_MODE"] = "mock"
     with TestClient(create_app()) as test_client:
         yield test_client
 
@@ -43,6 +44,20 @@ def test_full_mock_session_roundtrip(client: TestClient):
         ws.send_json({"type": "stop_session"})
         received = drain_until(ws, desired_types={"final"})
         assert any(msg["type"] == "final" for msg in received), received
+        agent = drain_until(ws, desired_types={"agent_message"})
+        assert any(msg["type"] == "agent_message" and msg["text"] for msg in agent), agent
+
+
+def test_agent_replies_with_state_flow(client: TestClient):
+    with client.websocket_connect("/ws/voice") as ws:
+        open_session(ws)
+        ws.send_json({"type": "audio", "data": PCM16_1S})
+        ws.send_json({"type": "audio", "data": PCM16_1S})
+        ws.send_json({"type": "stop_session"})
+        drain_until(ws, desired_types={"final"})
+        msgs = drain_until(ws, desired_types={"agent_message"})
+        assert [m["state"] for m in msgs if m["type"] == "state"] == ["PROCESSING", "THINKING"]
+        assert msgs[-1]["type"] == "agent_message" and msgs[-1]["text"]
 
 
 def test_audio_before_session_is_rejected(client: TestClient):

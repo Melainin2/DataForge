@@ -18,6 +18,17 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     max_audio_frame_bytes: int = 320_000
 
+    # --- LLM (Part 2) ---
+    llm_mode: Literal["real", "mock"] = "real"
+    llm_provider: Literal["groq"] = "groq"
+    groq_api_key: str = ""
+    llm_model: str = "llama-3.3-70b-versatile"
+    llm_temperature: float = 0.7
+    llm_max_tokens: int = 512
+    llm_timeout_seconds: float = 30.0
+    # Bounded conversation history sent to the LLM per turn (latency control).
+    max_context_messages: int = 24
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property

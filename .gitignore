@@ -16,6 +16,7 @@ venv/
 node_modules/
 frontend/.next/
 frontend/out/
+*.tsbuildinfo
 
 # --- os / editor ---
 .DS_Store

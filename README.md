@@ -86,17 +86,20 @@ The product behaves like a real assistant: you *speak*, it *understands*,
 *thinks*, answers, and can be **interrupted mid-sentence** — exactly like a
 natural human conversation.
 
-**Current status:** **Part 1 — System Foundation is implemented and verified.**
+**Current status:** **Part 2 — AI Agent Core is implemented and verified.**
 The voice pipeline works end-to-end in mock mode (no API key required) and is
-wired for the real AssemblyAI Universal-Streaming API (`STT_MODE=real`). The
-agentic layer (LLM, tools, RAG, memory, TTS) is 🔮 **PLANNED** for Parts 2–4.
+wired for the real AssemblyAI Universal-Streaming API (`STT_MODE=real`) and the
+real Groq free-tier LLM (`LLM_MODE=real`). Final transcripts now flow through a
+session-aware agent that replies conversationally, remembers the conversation,
+and renders the reply in the transcript panel. Tools, RAG, long-term memory and
+TTS are 🔮 **PLANNED** for Parts 3–4.
 
 | Part | Scope | Status |
 | :--- | :--- | :--- |
 | **Part 1** | System foundation: UI, mic, WebSocket relay, AssemblyAI streaming, transcript | ✅ IMPLEMENTED |
-| Part 2 | Agent orchestration, memory, tools | 🔮 PLANNED |
+| **Part 2** | AI agent core: LLM integration, session memory, transcript → agent → reply | ✅ IMPLEMENTED |
 | Part 3 | Voice experience: barge-in, streaming TTS, latency | 🔮 PLANNED |
-| Part 4 | Polish, deployment, demo & submission | 🔮 PLANNED |
+| Part 4 | Tools / RAG, polish, deployment, demo & submission | 🔮 PLANNED |
 
 ---
 
@@ -170,12 +173,12 @@ DataForge is a **single, coherent voice product**:
 | 6 | WebSocket connection management (connect / reconnect / backoff / error) | ✅ IMPLEMENTED |
 | 7 | Dark glassmorphism UI, live canvas waveform (reactive to mic), responsive layout | ✅ IMPLEMENTED |
 | 8 | `.env`-based secrets, never in frontend; `.env.example` + `.gitignore` | ✅ IMPLEMENTED |
-| 9 | Low-latency agentic loop (LLM + tool calling) | 🔮 PLANNED |
-| 10 | Conversational memory (short-term per session + long-term optional) | 🔮 PLANNED |
+| 9 | Agentic loop: final transcript → LLM reply, with `PROCESSING`/`THINKING` states (Groq free tier, swappable provider) | ✅ IMPLEMENTED |
+| 10 | Conversational memory (short-term, per session, bounded context; persistent long-term optional) | ✅ IMPLEMENTED |
 | 11 | RAG knowledge base (ChromaDB + local embeddings) | 🔮 PLANNED |
 | 12 | Turn detection & **barge-in / interruption handling** | 🔮 PLANNED |
 | 13 | Streaming TTS back to the browser | 🔮 PLANNED |
-| 14 | Latency observability per pipeline stage | 🔮 PLANNED |
+| 14 | Latency observability per pipeline stage (transcript → agent → reply) | ✅ IMPLEMENTED |
 
 ---
 
@@ -347,8 +350,10 @@ flowchart LR
     LTM --> CTX
 ```
 
-- **Short-term memory:** automatic — the full session transcript is curated and
-  re-injected via LangGraph checkpointer (SQLite, file-based, free).
+- **Short-term memory:** automatic — the per-session conversation is stored in
+  an in-memory `ConversationManager` (bounded to `MAX_CONTEXT_MESSAGES` turns)
+  and re-injected on every agent turn. *Part 2 ships this; a persistent
+  checkpointer (SQLite) is planned for Part 4.*
 - **Long-term memory:** explicit facts ("user's name…", recurring preferences)
   persisted and recalled in later sessions. *(Optional, keeps MVP simple.)*
 
@@ -461,19 +466,25 @@ DataForge/
 │   ├── requirements.txt
 │   ├── .env.example
 │   ├── app/
-│   │   ├── main.py           # app factory, CORS, router wiring
-│   │   ├── config.py         # pydantic-settings (env-based config)
+│   │   ├── main.py           # app factory, CORS, router wiring, agent lifespan
+│   │   ├── config.py         # pydantic-settings (env-based config, STT + LLM)
+│   │   ├── agent/            # Part 2 — intelligence layer
+│   │   │   ├── agent.py      # VoiceAgent.process(transcript, session_id)
+│   │   │   ├── llm.py        # LLMProvider interface + Groq + deterministic mock
+│   │   │   ├── memory.py     # conversation memory (session store, bounded)
+│   │   │   ├── prompts.py    # voice-first system prompt + fallback reply
+│   │   │   └── types.py      # Message / Conversation dataclasses
 │   │   ├── api/
-│   │   │   └── health.py     # GET /api/health
+│   │   │   └── health.py     # GET /api/health (reports STT + LLM + agent status)
 │   │   ├── ws/
-│   │   │   └── router.py     # /ws/voice relay (validated WS messages)
+│   │   │   └── router.py     # /ws/voice relay + agent turn orchestration
 │   │   ├── services/
 │   │   │   └── assemblyai.py # v3 streaming client (real + mock)
 │   │   ├── models/
 │   │   │   └── ws.py         # client message + outbound payload builders
 │   │   └── utils/
 │   │       └── logging.py
-│   └── tests/                # pytest (health + WebSocket relay)
+│   └── tests/                # pytest (health + WebSocket relay + agent unit/integration)
 ├── frontend/                 # Next.js app
 │   ├── package.json
 │   ├── next.config.mjs
@@ -501,8 +512,8 @@ DataForge/
     └── architecture-diagram.md   # deeper dive (optional, not yet created)
 ```
 
-> ✅ The structure above matches the current repository (agent/RAG/TTS folders
-> will be added in Parts 2–4).
+> ✅ The structure above matches the current repository (tool/RAG/TTS folders
+> will be added in Parts 3–4).
 
 ---
 
@@ -550,6 +561,19 @@ ASSEMBLYAI_SPEECH_MODEL=universal-3-5-pro
 # mock -> deterministic fake transcripts, perfect for local dev/tests
 STT_MODE=real
 
+# --- LLM (Part 2) — Groq free tier ---
+# real -> Groq chat completions (needs a GROQ_API_KEY from console.groq.com)
+# mock -> deterministic fake agent replies, perfect for local dev/tests
+LLM_MODE=real
+LLM_PROVIDER=groq
+GROQ_API_KEY=
+LLM_MODEL=llama-3.3-70b-versatile
+LLM_TEMPERATURE=0.7
+LLM_MAX_TOKENS=512
+LLM_TIMEOUT_SECONDS=30
+# Bounded conversation history sent to the LLM per turn (latency control).
+MAX_CONTEXT_MESSAGES=24
+
 # --- Server ---
 FRONTEND_ORIGIN=http://localhost:3000
 LOG_LEVEL=INFO
@@ -558,17 +582,22 @@ LOG_LEVEL=INFO
 # NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws/voice
 ```
 
+> ⚠️ **Mock mode:** `STT_MODE=mock LLM_MODE=mock` lets you run the *entire* voice
+> agent (speech → transcript → agent reply → transcript) with **zero API
+> keys**. Real mode only needs `ASSEMBLYAI_API_KEY` + `GROQ_API_KEY`. The mock
+> LLM is deterministic and demonstrates session memory ("My name is Ahmed…").
+
 ---
 
 ## 19. Local Development
 
 ```bash
-# Backend (mock STT — no API key needed; great for offline demos)
+# Backend (mock STT + mock LLM — zero API keys, great for offline demos)
 cd backend
 source .venv/bin/activate
-STT_MODE=mock uvicorn app.main:app --reload --port 8000
+STT_MODE=mock LLM_MODE=mock uvicorn app.main:app --reload --port 8000
 
-# Backend (real AssemblyAI streaming)
+# Backend (real AssemblyAI streaming + real Groq LLM)
 cd backend
 source .venv/bin/activate
 uvicorn app.main:app --reload --port 8000   # reads backend/.env
@@ -581,7 +610,9 @@ npm run dev
 
 Opening the page triggers the mic-consent flow, opens the WebSocket, and the
 agent enters `LISTENING` on tap. Say something — partials stream in live,
-finals resolve, and the conversation renders below the mic.
+finals resolve, the **agent replies**, and the whole conversation renders
+below the mic. (In mock mode, stop the session to complete your turn — the
+mock STT emits its final transcript on close.)
 
 ## 20. API & WebSocket
 
@@ -597,22 +628,27 @@ configured in the frontend via `NEXT_PUBLIC_WS_URL`)
 | Backend → Browser | `{"type":"connected","session_id":"..."}` | Relay established |
 | Backend → Browser | `{"type":"state","state":"LISTENING"}` | Server-side voice state change |
 | Backend → Browser | `{"type":"partial","text":"..."}` | Live (non-final) transcript |
-| Backend → Browser | `{"type":"final","text":"..."}` | Final transcript |
+| Backend → Browser | `{"type":"final","text":"..."}` | Final transcript (completed user turn) |
+| Backend → Browser | `{"type":"agent_message","text":"..."}` | Agent's reply to the final transcript (Part 2) |
 | Backend → Browser | `{"type":"session_closed"}` | STT session ended |
 | Backend → Browser | `{"type":"error","code":"...","message":"..."}` | Recoverable errors |
 
-**Lifecycle (Part 1):**
+**Lifecycle (Part 2):**
 1. Browser opens the WebSocket; backend acks with `connected`.
 2. Browser sends `start_session` → backend connects to the AssemblyAI
    Universal-Streaming socket (v3) → `state: LISTENING`.
 3. Mic PCM (16 kHz PCM16, base64 frames) flows browser → backend → AssemblyAI.
 4. AssemblyAI `Turn` messages are relayed as `partial` (end_of_turn=false) or
    `final` (end_of_turn=true).
-5. `stop_session` → backend sends `{"type":"Terminate"}` (flushes the final
+5. On the **final** transcript the backend runs the Agent for this session
+   (memory ← user turn → LLM → memory ← reply), driving the UI through
+   `PROCESSING → THINKING`, then delivers `agent_message` and returns to
+   `state: LISTENING`.
+6. `stop_session` → backend sends `{"type":"Terminate"}` (flushes the final
    transcript), closes the session, returns to `state: IDLE`.
 
-> Interrupt message (`interrupt`) and TTS/agent messages are reserved for
-> Parts 2–3 and intentionally not implemented yet.
+> Interrupt message (`interrupt`), tools, RAG, streaming and TTS messages are
+> reserved for Parts 3–4 and intentionally not implemented yet.
 
 ---
 
@@ -622,7 +658,7 @@ configured in the frontend via `NEXT_PUBLIC_WS_URL`)
 | :--- | :--- | :--- |
 | Voice | mic permissions, silence, background noise, interruption | Manual checklist + `pytest` fixture scripts |
 | STT | API contract, reconnect, partial/final events | Mocked AssemblyAI client |
-| Agent | intent, context, tool selection, hallucination-prevention prompts | `pytest` + prompt unit tests |
+| Agent | conversation memory/context, LLM error fallbacks, provider contract | `pytest` (deterministic mock LLM + httpx `MockTransport`) |
 | RAG | retrieval quality, irrelevant/missing-info queries | Retrieval assertions on fixture docs |
 | Backend | WebSocket errors, timeouts, reconnection | `pytest` + `httpx.ASGITransport`, `websockets` |
 | UI | responsive, animations, a11y, loading states | Playwright + RTL |
@@ -682,7 +718,8 @@ Lightweight, self-hosted, zero-cost:
 
 ### WEEK 1 — MVP · *Goal: Working Voice Agent*
 
-> ✅ **Part 1 delivered** — the foundation below is implemented and tested.
+> ✅ **Parts 1 & 2 delivered** — the foundation and agent core below are
+> implemented and tested.
 
 - [x] Clean repository, init git, professional README
 - [x] Verify architecture & document stack
@@ -691,16 +728,17 @@ Lightweight, self-hosted, zero-cost:
 - [x] Real-time transcription streaming (partial + final relay)
 - [x] Voice WebSocket relay with validation, states & error codes
 - [x] Basic frontend (mic button, live waveform, transcript panel, connection badge)
-- [ ] Basic LLM turn (Part 2)
-- [ ] Basic TTS response (Part 2/3)
+- [x] **Basic LLM turn (Part 2) — final transcript → Groq/mock agent reply**
+- [ ] Basic TTS response (Part 3)
 
 ### WEEK 2 — AGENT · *Goal: chatbot → agent*
 
-- [ ] Agent orchestration (LangGraph loop)
-- [ ] Memory (checkpointer / conversation history)
+- [x] Agent orchestration (`VoiceAgent` over a swappable `LLMProvider`)
+- [x] Memory (session conversation manager, bounded context)
+- [x] Error handling & context management (natural fallbacks, failure isolation)
 - [ ] Tool calling (RAG search, web search)
 - [ ] RAG ingest + retrieval pipeline
-- [ ] Error handling & context management
+- [ ] Persistent (long-term) memory checkpointer
 
 ### WEEK 3 — VOICE EXPERIENCE · *Goal: feels like a real voice agent*
 

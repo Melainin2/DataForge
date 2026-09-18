@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -19,8 +19,25 @@ def make_partial(text: str) -> dict:
     return {"type": "partial", "text": text}
 
 
-def make_final(text: str) -> dict:
-    return {"type": "final", "text": text}
+def make_final(text: str, confidence: Optional[float] = None) -> dict:
+    payload: dict = {"type": "final", "text": text}
+    if confidence is not None:
+        payload["confidence"] = round(confidence, 3)
+    return payload
+
+
+def make_agent_message(
+    text: str,
+    *,
+    needs_confirmation: bool = False,
+    action_item: Optional[dict] = None,
+) -> dict:
+    payload: dict = {"type": "agent_message", "text": text}
+    if needs_confirmation:
+        payload["needs_confirmation"] = True
+    if action_item is not None:
+        payload["action_item"] = action_item
+    return payload
 
 
 def make_error(code: str, message: str) -> dict:

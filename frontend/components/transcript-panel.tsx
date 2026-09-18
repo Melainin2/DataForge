@@ -31,7 +31,9 @@ export function TranscriptPanel({ messages }: { messages: TranscriptMessage[] })
               className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border ${
                 message.speaker === "user"
                   ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
-                  : "border-indigo-400/30 bg-indigo-400/10 text-indigo-300"
+                  : message.needsConfirmation
+                    ? "border-amber-400/30 bg-amber-400/10 text-amber-300"
+                    : "border-indigo-400/30 bg-indigo-400/10 text-indigo-300"
               }`}
             >
               {message.speaker === "user" ? (
@@ -40,14 +42,24 @@ export function TranscriptPanel({ messages }: { messages: TranscriptMessage[] })
                 <Bot className="h-3.5 w-3.5" />
               )}
             </span>
-            <p
-              className={`text-sm leading-relaxed ${
-                message.final ? "text-slate-100" : "text-slate-300"
-              }`}
-            >
-              {message.text}
-              {!message.final && <span className="text-slate-500">…</span>}
-            </p>
+            <div className="flex flex-col gap-1">
+              <p
+                className={`text-sm leading-relaxed ${
+                  message.final ? "text-slate-100" : "text-slate-300"
+                } ${message.needsConfirmation ? "italic text-amber-200" : ""}`}
+              >
+                {message.text}
+                {!message.final && <span className="text-slate-500">…</span>}
+              </p>
+              {message.speaker === "user" &&
+                message.final &&
+                typeof message.confidence === "number" &&
+                message.confidence < 0.55 && (
+                  <span className="w-fit rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[11px] font-medium text-amber-300">
+                    Low confidence — {Math.round(message.confidence * 100)}%
+                  </span>
+                )}
+            </div>
           </motion.div>
         ))
       )}

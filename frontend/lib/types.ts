@@ -21,13 +21,26 @@ export interface TranscriptMessage {
   text: string;
   timestamp: number;
   final: boolean;
+  confidence?: number;
+  needsConfirmation?: boolean;
+}
+
+export interface ActionItem {
+  title: string;
+  category: string;
 }
 
 export type ServerMessage =
   | { type: "connected"; session_id?: string }
   | { type: "state"; state: VoiceState }
   | { type: "partial"; text: string }
-  | { type: "final"; text: string }
+  | { type: "final"; text: string; confidence?: number }
+  | {
+      type: "agent_message";
+      text: string;
+      needs_confirmation?: boolean;
+      action_item?: ActionItem | null;
+    }
   | { type: "session_closed" }
   | { type: "pong" }
   | { type: "error"; code: string; message: string };
