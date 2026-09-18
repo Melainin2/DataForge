@@ -12,7 +12,10 @@ import type {
   VoiceState,
 } from "@/lib/types";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws/voice";
+// `||` (not `??`): an empty-string env var (e.g. a blank value saved in a
+// hosting dashboard) must also fall back — `??` only catches null/undefined
+// and would otherwise silently try `new WebSocket("")`.
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws/voice";
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 const BASE_RETRY_MS = 600;
